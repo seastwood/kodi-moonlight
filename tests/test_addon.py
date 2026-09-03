@@ -73,6 +73,14 @@ check("enabled=1" in install and "disabledReason=0" in install,
       "and a stopped one has its database written, the way kodi-retrobox does")
 check("Not executing non-existing script" in install,
       "with the message it fixes written down beside it")
+# On a fresh install this runs seconds after the directory appeared, and Kodi
+# answers "Invalid params" for an add-on it has not rescanned yet -- which
+# reads like a bad request and is a race with its own rescan.
+check("for attempt in range(" in install,
+      "and it waits for Kodi's rescan rather than asking once and giving up")
+check("restart Kodi once" in install,
+      "with the database written as the fallback, which turns 'enable it by "
+      "hand' into 'restart Kodi once'")
 # The second thing Kodi will not work out: it caches images by path, and the
 # tile is replaced at the same path every install.
 check("Textures.RemoveTexture" in install,

@@ -182,8 +182,36 @@ if running:
         # Through Kodi itself, because it holds this in memory while it runs
         # and writes it back on the way out: an edit made underneath a running
         # Kodi is undone at the next shutdown, silently.
-        answer = call("Addons.SetAddonEnabled", {"addonid": ADDON, "enabled": True})
+        #
+        # Retried, because on a fresh install this runs seconds after the
+        # directory appeared and Kodi answers "Invalid params" for an add-on
+        # it has not noticed yet -- which reads like a bad request and is
+        # really a race with its own rescan. The rescan was asked for above;
+        # this waits for it to land.
+        answer = {}
+        for attempt in range(12):
+            answer = call("Addons.SetAddonEnabled",
+                          {"addonid": ADDON, "enabled": True})
+            if answer.get("result") == "OK":
+                break
+            time.sleep(1)
         if answer.get("result") != "OK":
+            # Its own list is what Kodi reads at startup, so writing the row
+            # is not nothing -- it is the difference between "enable it by
+            # hand" and "restart Kodi once".
+            if addon_dbs:
+                con = sqlite3.connect(addon_dbs[-1])
+                with con:
+                    con.execute(
+                        "insert or replace into installed"
+                        "(addonID, enabled, installDate) values(?, 1, ?)",
+                        (ADDON, time.strftime("%Y-%m-%d %H:%M:%S")))
+                con.close()
+                print("Kodi has not noticed the add-on yet (%s)."
+                      % answer.get("error", answer))
+                print("Written into its database instead: restart Kodi once "
+                      "and it will be there.")
+                sys.exit(0)
             print("Kodi would not enable it: %s" % answer)
             sys.exit(1)
         print("enabled")
