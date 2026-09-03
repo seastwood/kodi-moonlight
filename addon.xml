@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="script.moonlight" name="Moonlight" version="1.0.0" provider-name="Seth Eastwood">
+  <requires>
+    <import addon="xbmc.python" version="3.0.0"/>
+  </requires>
+  <extension point="xbmc.python.script" library="main.py">
+    <provides>executable</provides>
+  </extension>
+  <extension point="xbmc.addon.metadata">
+    <summary lang="en_GB">Play games streamed from another machine</summary>
+    <description lang="en_GB">Opens Moonlight and brings it in front of Kodi, so a game running on a PC elsewhere in the house can be played from the sofa with a controller. Installs Moonlight itself if the machine has not got it, and comes back to Kodi when you quit. Sits beside the emulators on a Kodi machine used as a games console.</description>
+    <platform>linux</platform>
+    <license>MIT</license>
+    <assets>
+      <icon>icon.png</icon>
+    </assets>
+  </extension>
+</addon>

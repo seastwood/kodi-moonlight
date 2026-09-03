@@ -1,0 +1,174 @@
+"""Finding Moonlight, installing it, and getting it in front of Kodi.
+
+Nothing real is touched: `sh`, `popen` and `exists` are the only three ways
+moonlight_core reaches the outside world, and all three are replaced here.
+That matters more than usual for this add-on -- the code under test can start
+a download and a program that takes over the screen.
+
+The decision worth writing down is the install route. Steam's add-on prefers a
+native package because Ubuntu and Mint package Steam; neither packages
+Moonlight. The only `moonlight` in their archives is a Discord mod and the
+only related thing is `sunshine`, which is the host half, not the client. So
+Flathub it is -- for one user, needing no root, and therefore no privileged
+helper anywhere in this add-on. A machine that already has a moonlight binary,
+installed any other way, is left alone and used as it is.
+"""
+import importlib.machinery
+import importlib.util
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ldr = importlib.machinery.SourceFileLoader(
+    "moonlight_core", os.path.join(os.path.dirname(HERE), "moonlight_core.py"))
+core = importlib.util.module_from_spec(
+    importlib.util.spec_from_loader("moonlight_core", ldr))
+ldr.exec_module(core)
+
+fails = []
+
+
+def check(cond, msg):
+    print(("  ok   " if cond else "  FAIL ") + msg)
+    if not cond:
+        fails.append(msg)
+
+
+class FakeShutil:
+    def __init__(self, present):
+        self.present = set(present)
+
+    def which(self, name):
+        return "/usr/bin/" + name if name in self.present else None
+
+
+def stub(present=(), output=None, files=()):
+    core.shutil = FakeShutil(present)
+    table = output or {}
+    wanted = set(files)
+    core.exists = lambda path: path in wanted
+    calls = []
+
+    def fake_sh(*argv, **kw):
+        calls.append(list(argv))
+        for key, value in table.items():
+            if key in argv:
+                return value
+        return ""
+
+    core.sh = fake_sh
+    return calls
+
+
+print("which Moonlight is here")
+stub(present=["moonlight-qt"])
+check(core.launch_argv() == ["/usr/bin/moonlight-qt"],
+      "a packaged moonlight-qt is started straight")
+stub(present=["moonlight"])
+check(core.launch_argv() == ["/usr/bin/moonlight"],
+      "and so is a plain `moonlight`, which is what the snap and most "
+      "distributions call it")
+stub(present=["flatpak"], output={"list": "org.videolan.VLC\n"})
+check(core.launch_argv() is None,
+      "flatpak being installed is not Moonlight being installed")
+stub(present=["flatpak"],
+     output={"list": "com.moonlight_stream.Moonlight\norg.videolan.VLC\n"})
+check(core.launch_argv() ==
+      ["flatpak", "run", "com.moonlight_stream.Moonlight"],
+      "the Flatpak is used when there is no binary")
+stub(present=["moonlight", "flatpak"],
+     output={"list": "com.moonlight_stream.Moonlight\n"})
+check(core.launch_argv()[0] == "/usr/bin/moonlight",
+      "and a machine that already has one is left alone rather than given "
+      "a second copy")
+stub(present=[])
+check(core.launch_argv() is None and core.installed() is False,
+      "a machine with neither has neither")
+
+print("how it would be installed")
+stub(present=["flatpak"])
+argv = core.install_argv()
+check(argv[:3] == ["flatpak", "install", "--user"],
+      "Flathub, for this user -- so nothing in this add-on needs root")
+check("--noninteractive" in argv and "--assumeyes" in argv,
+      "and nothing that stops to ask a question nobody can answer from a sofa")
+check(argv[-1] == core.FLATPAK_APP, "naming the application, not a search")
+stub(present=[])
+check(core.install_argv() is None,
+      "a machine with no flatpak says so rather than guessing")
+
+print("whether it is already running")
+stub(output={"comm": "systemd\nkodi.bin\nmoonlight-qt\n"})
+check(core.running() is True, "it is up")
+stub(output={"comm": "systemd\nkodi.bin\n"})
+check(core.running() is False, "and here it is not")
+
+print("which window to raise")
+WINDOWS = (
+    "0x03000001  0 100 100  1    1    retro Moonlight\n"
+    "0x03000007  0 0   0    1920 1080 retro Moonlight\n"
+    "0x02000003  0 0   0    1920 1080 retro Kodi\n")
+stub(output={"-lG": WINDOWS})
+check(core.window() == "0x03000007",
+      "the big one, not the first: a 1x1 window raises fine and shows nothing")
+stub(output={"-lG": "0x02000003  0 0 0 1920 1080 retro Kodi\n"})
+check(core.window() is None, "and Kodi's own window is not Moonlight's")
+
+print("the icon on the menu tile")
+stub(present=[], files=[os.path.expanduser(core.ICON_PATHS[1])])
+check(core.best_icon() == os.path.expanduser(core.ICON_PATHS[1]),
+      "Moonlight's own, from inside the installation")
+stub(present=[])
+check(core.best_icon() is None,
+      "and nothing at all before it is installed, so the drawing shipped here "
+      "is what the tile gets until then")
+check(all("flatpak" in p or "/usr/share/icons" in p for p in core.ICON_PATHS),
+      "the places looked at are installations, not a guess at a name")
+
+print("installing, out loud")
+
+
+class FakeProc:
+    def __init__(self, lines, code):
+        self.stdout = iter(lines)
+        self.code = code
+
+    def wait(self):
+        return self.code
+
+
+seen = []
+core.popen = lambda argv, **kw: FakeProc(["Installing...", "Now at 6.1.0"], 0)
+ok, tail = core.install(["flatpak", "install"], seen.append)
+check(ok is True and seen[0] == "Installing...",
+      "a clean run succeeds, and every line is offered as it arrives")
+core.popen = lambda argv, **kw: FakeProc(["error: no remote flathub"], 1)
+ok, tail = core.install(["flatpak", "install"], None)
+check(ok is False and "no remote flathub" in tail,
+      "and a failure comes back with what was said, which is the useful part")
+
+
+def refuse(argv, **kw):
+    raise OSError("No such file or directory: 'flatpak'")
+
+
+core.popen = refuse
+ok, tail = core.install(["flatpak", "install"], None)
+check(ok is False and "No such file" in tail,
+      "a command that cannot start is a failure, not a traceback")
+
+print("the display")
+os.environ.pop("DISPLAY", None)
+check(core.environment()["DISPLAY"] == ":0",
+      "a program started from Kodi is told which screen to use")
+os.environ["DISPLAY"] = ":1"
+check(core.environment()["DISPLAY"] == ":1",
+      "and one that is already set is left alone")
+
+print()
+if fails:
+    print("FAILED: %d" % len(fails))
+    for line in fails:
+        print("  " + line)
+    sys.exit(1)
+print("all good")
