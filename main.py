@@ -81,8 +81,8 @@ def start_moonlight():
 
 def offer_install():
     """Moonlight is not here. Offer to fetch it, and say what that involves."""
-    argv = moonlight_core.install_argv()
-    if not argv:
+    steps = moonlight_core.install_argv()
+    if not steps:
         xbmcgui.Dialog().ok(
             TITLE,
             "Moonlight is not installed, and this machine has no Flatpak to "
@@ -107,9 +107,13 @@ def offer_install():
         if text:
             progress.update(50, TITLE, text[:60])
 
-    log("installing: %s" % " ".join(argv))
+    # Each step on its own line: on a machine that has never installed a user
+    # flatpak the first one adds the Flathub remote, and knowing whether that
+    # ran is the difference between "Flathub is down" and "nothing had told
+    # this installation about Flathub".
+    log("installing:\n  %s" % "\n  ".join(" ".join(step) for step in steps))
     try:
-        ok, tail = moonlight_core.install(argv, line)
+        ok, tail = moonlight_core.install(steps, line)
     finally:
         progress.close()
 

@@ -85,14 +85,37 @@ stub(present=[])
 check(core.launch_argv() is None and core.installed() is False,
       "a machine with neither has neither")
 
-print("how it would be installed")
-stub(present=["flatpak"])
-argv = core.install_argv()
+print("how it would be installed, on a machine that already knows Flathub")
+stub(present=["flatpak"], output={"remotes": "flathub\n"})
+steps = core.install_argv()
+check(len(steps) == 1, "one command, got %d" % len(steps))
+argv = steps[-1]
 check(argv[:3] == ["flatpak", "install", "--user"],
       "Flathub, for this user -- so nothing in this add-on needs root")
 check("--noninteractive" in argv and "--assumeyes" in argv,
       "and nothing that stops to ask a question nobody can answer from a sofa")
 check(argv[-1] == core.FLATPAK_APP, "naming the application, not a search")
+
+# The state every freshly installed Mint is in. Flathub is added to the system
+# installation by the distribution, and this add-on installs into the user
+# one, which is a separate world with no remotes in it at all. Asking anyway
+# fails with "No remote refs found for 'flathub'", which sounds like Flathub
+# is empty rather than like a remote nobody added. It was invisible on the
+# machine this was written on, where something had added the user remote years
+# earlier, and it broke on the first console installed from scratch.
+print("\nand on one that does not")
+calls = stub(present=["flatpak"])                # `flatpak remotes` says nothing
+steps = core.install_argv()
+check(any("remotes" in call and "--user" in call for call in calls),
+      "it asks the *user* installation what remotes it has, not the system one")
+check(len(steps) == 2, "two commands, got %d" % len(steps))
+check(steps[0][:4] == ["flatpak", "remote-add", "--user", "--if-not-exists"],
+      "the first adds Flathub for this user, and does not mind it being there "
+      "already; got %s" % (steps[0][:4],))
+check(steps[0][-1] == core.FLATHUB_REPO,
+      "from Flathub's own description of itself")
+check(steps[1][-1] == core.FLATPAK_APP, "and the second installs Moonlight")
+
 stub(present=[])
 check(core.install_argv() is None,
       "a machine with no flatpak says so rather than guessing")
@@ -184,6 +207,27 @@ check(core.environment()["DISPLAY"] == ":0",
 os.environ["DISPLAY"] = ":1"
 check(core.environment()["DISPLAY"] == ":1",
       "and one that is already set is left alone")
+
+print("\na step that fails stops the ones after it")
+core.popen = lambda argv, **kw: FakeProc(
+    ["error: No remote refs found for flathub"], 1)
+ran = []
+
+
+def counting(argv, **kw):
+    ran.append(argv)
+    return FakeProc(["error: No remote refs found for flathub"], 1)
+
+
+core.popen = counting
+ok, tail = core.install([["flatpak", "remote-add"], ["flatpak", "install"]])
+check(ok is False, "it reports failure")
+check("No remote refs" in tail,
+      "and hands back what flatpak said, which is the only thing that "
+      "explains it")
+check(len(ran) == 1,
+      "and it stopped: there is no point downloading a gigabyte from a remote "
+      "that could not be added, got %d command(s)" % len(ran))
 
 print()
 if fails:

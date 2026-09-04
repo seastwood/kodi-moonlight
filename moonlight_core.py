@@ -28,6 +28,9 @@ import subprocess
 import time
 
 FLATPAK_APP = "com.moonlight_stream.Moonlight"
+# Where Flathub describes itself. Needed because this installs into the
+# per-user flatpak installation, which on most machines has no remotes at all.
+FLATHUB_REPO = "https://dl.flathub.org/repo/flathub.flatpakrepo"
 
 # Whoever packaged it. moonlight-qt is the name upstream's own packages use;
 # `moonlight` is what the Flatpak's wrapper and most distributions call it.
@@ -203,38 +206,79 @@ def installed():
     return launch_argv() is not None
 
 
+def knows_flathub():
+    """Whether the per-user flatpak installation has heard of Flathub.
+
+    Mint and Ubuntu add Flathub to the *system* installation. This add-on
+    installs into the user one, and those are separate worlds: a system remote
+    is invisible to `--user`. Asking for it anyway fails with
+
+        error: No remote refs found for 'flathub'
+
+    which reads as Flathub being down, or empty, rather than as a remote
+    nobody has added here. The machine this was written on had both remotes --
+    something else had added the user one years ago -- so it worked there and
+    failed on the first console that had only ever been installed once.
+    """
+    listed = sh("flatpak", "remotes", "--user", "--columns=name")
+    return "flathub" in listed.split()
+
+
 def install_argv():
-    """How Moonlight could be installed here, or None.
+    """The commands that would install Moonlight here, or None.
+
+    A list of them, because on a machine that has never installed a user
+    flatpak this takes two: teach the user installation about Flathub, then
+    install from it.
 
     `--user` on purpose: it needs no root, so nothing about this add-on has to
     be privileged and there is no password to type at a television.
     """
     if not shutil.which("flatpak"):
         return None
-    return ["flatpak", "install", "--user", "--assumeyes", "--noninteractive",
-            "flathub", FLATPAK_APP]
+    steps = []
+    if not knows_flathub():
+        # --if-not-exists so that two of these racing, or a second run after a
+        # half-finished first, is not an error.
+        steps.append(["flatpak", "remote-add", "--user", "--if-not-exists",
+                      "flathub", FLATHUB_REPO])
+    steps.append(["flatpak", "install", "--user", "--assumeyes",
+                  "--noninteractive", "flathub", FLATPAK_APP])
+    return steps
 
 
-def install(argv, on_line=None):
-    """Run an install, feeding each line of output to `on_line`.
+def install(steps, on_line=None):
+    """Run each step in order, feeding every line of output to `on_line`.
 
     Returns (ok, tail). The tail is the last few lines, because that is what a
     failure has to be explained with -- flatpak says why on the line before it
     stops, and a dialog reading "it failed" without that is a dead end.
+
+    Stops at the first step that fails. There is no point downloading a
+    gigabyte from a remote that could not be added.
     """
-    try:
-        proc = popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                     text=True, env=environment())
-    except OSError as exc:
-        return False, str(exc)
+    # One command is still accepted, so a caller with a single argv -- and
+    # every test that passed one -- keeps working.
+    if steps and isinstance(steps[0], str):
+        steps = [steps]
     tail = []
-    for line in proc.stdout:
-        line = line.rstrip()
-        tail.append(line)
-        del tail[:-6]
-        if on_line:
-            on_line(line)
-    return proc.wait() == 0, "\n".join(tail)
+    for argv in steps:
+        try:
+            proc = popen(argv, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, text=True,
+                         env=environment())
+        except OSError as exc:
+            tail.append(str(exc))
+            return False, "\n".join(tail[-6:])
+        for line in proc.stdout:
+            line = line.rstrip()
+            tail.append(line)
+            del tail[:-6]
+            if on_line:
+                on_line(line)
+        if proc.wait() != 0:
+            return False, "\n".join(tail)
+    return True, "\n".join(tail)
 
 
 def running():
