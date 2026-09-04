@@ -92,6 +92,67 @@ if os.path.exists(generator):
               "be corrected rather than only inherited")
         os.remove(made)
 
+# --- and what happens to it once the real application arrives -----------------
+#
+# The tile was drawn once at install time and then only ever rewritten by an
+# install this add-on performed itself. Install the application any other way
+# -- apt, a software centre, somebody's own build -- and the menu kept the
+# drawing for ever, because nothing else looked. That is what "I installed it
+# and the icon did not change" was.
+#
+# The other half was Kodi. It caches every image it draws, keyed by path, and
+# the tile keeps its path: replacing the file underneath that key changes
+# nothing on screen, and neither does reloading the skin. Verified on the
+# console -- with the cached copy removed the real icon appeared, and with it
+# there no amount of rewriting the file did anything.
+
+import shutil
+import tempfile
+
+sys.path.insert(0, ROOT)
+import moonlight_core as core                                            # noqa: E402
+
+print("\ntaking the real icon once the application is installed")
+folder = tempfile.mkdtemp()
+core.TILE = os.path.join(folder, "tile.png")
+theirs = os.path.join(folder, "theirs.png")
+with open(theirs, "wb") as writing:
+    writing.write(b"the application's own icon")
+
+core.best_icon = lambda: None
+used = core.refresh_tile(fallback=tile)
+check(used == tile, "before it is installed the drawing shipped here is used")
+check(open(core.TILE, "rb").read() == open(tile, "rb").read(),
+      "and that is what lands on the menu")
+
+# best_icon() here answers (path, kind), because on a Flathub install what
+# exists may be an SVG that has to be drawn rather than copied.
+core.best_icon = lambda: (theirs, "png")
+used = core.refresh_tile()
+check(used == theirs, "once it is installed its own icon wins")
+check(open(core.TILE, "rb").read() == b"the application's own icon",
+      "and replaces what was there")
+
+before = open(core.TILE, "rb").read()
+core.refresh_tile()
+check(open(core.TILE, "rb").read() == before,
+      "asking again changes nothing, so a launch that has nothing to do "
+      "leaves Kodi's cache alone")
+shutil.rmtree(folder, ignore_errors=True)
+
+print("\nand the menu is checked on every launch, not only after an install")
+main = open(os.path.join(ROOT, "main.py")).read()
+entry_at = main.index('if __name__ == "__main__":')
+launch = main[entry_at:]
+check("take_its_icon()" in launch,
+      "the tile is refreshed from the entry point, so an application "
+      "installed by any other route still corrects the menu")
+check(launch.index("take_its_icon()") < launch.index("start_moonlight()"),
+      "and before the application is started, not after")
+check("Textures.RemoveTexture" in main,
+      "Kodi is told to forget the cached copy, which is the only thing that "
+      "makes a replaced tile appear")
+
 print()
 if fails:
     print("FAILED: %d" % len(fails))

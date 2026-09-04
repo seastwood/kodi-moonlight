@@ -11,6 +11,7 @@ that costs before starting, and opens it when it is done.
 """
 
 import json
+import os
 import sys
 
 import xbmc
@@ -145,8 +146,21 @@ def take_its_icon():
     caches images by path, the tile keeps its path, and a file replaced
     underneath that key is not something Kodi goes looking for.
     """
+    def on_disk():
+        try:
+            with open(os.path.expanduser(moonlight_core.TILE), "rb") as reading:
+                return reading.read()
+        except OSError:
+            return None
+
+    before = on_disk()
     used = moonlight_core.refresh_tile()
     if not used:
+        return
+    if on_disk() == before:
+        # Nothing changed, so there is nothing stale to throw away. This runs
+        # on every launch now, and clearing the cache each time would make
+        # Kodi re-read and re-cache the tile for no reason.
         return
     log("menu tile now %s" % used)
     try:
@@ -164,4 +178,14 @@ def take_its_icon():
 
 
 if __name__ == "__main__":
+    # Before anything else, because the application may have been installed
+    # since the last run and by some other route -- apt, a software centre,
+    # somebody's own build. Those leave the menu showing the drawing this
+    # add-on ships, for ever, and nothing else was ever going to notice.
+    # Cheap when there is nothing to do: it compares the file it would write
+    # with the file already there and stops.
+    try:
+        take_its_icon()
+    except Exception as exc:          # noqa: BLE001 - a tile is not the job
+        log("could not check the menu tile: %s" % exc, xbmc.LOGWARNING)
     start_moonlight()
