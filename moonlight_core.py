@@ -165,10 +165,18 @@ exists = os.path.isfile
 
 
 def sh(*argv, **kw):
-    """Run a command and return its output, or "" if it could not be run."""
+    """Run a command and return its output, or "" if it could not be run.
+
+    Decoded as UTF-8 explicitly, and never allowed to fail on it. text=True
+    alone decodes with the locale's encoding, and inside Kodi that is ASCII --
+    so the first window title carrying an accent, a copyright sign or a
+    non-breaking space took this down with a UnicodeDecodeError. Found on a
+    console installed from scratch, where Steam's own window was enough.
+    """
     timeout = kw.get("timeout", 20)
     try:
         done = subprocess.run(list(argv), capture_output=True, text=True,
+                              encoding="utf-8", errors="replace",
                               timeout=timeout, env=environment())
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -278,6 +286,7 @@ def install(steps, on_line=None):
         try:
             proc = popen(argv, stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, text=True,
+                         encoding="utf-8", errors="replace",
                          env=environment())
         except OSError as exc:
             tail.append(str(exc))
