@@ -67,8 +67,12 @@ APP_ICON_DIRS = (
 )
 # Biggest first: a tile is drawn at a few hundred pixels and scaling one up
 # from 64 shows.
-ICON_SIZES = ("512x512", "384x384", "256x256", "192x192", "128x128",
-              "96x96", "64x64", "48x48")
+# Biggest first, and "@2" means double: 128x128@2 is a real 256-pixel file,
+# which is why it sorts with 256x256 rather than with 128x128. On a Flathub
+# install that entry is the whole reason this works without anything extra
+# installed -- it is the same 256 pixels the SVG would have been rendered at.
+ICON_SIZES = ("512x512", "384x384", "256x256", "128x128@2", "192x192",
+              "128x128", "64x64@2", "96x96", "64x64", "48x48")
 ICON_NAMES = (FLATPAK_APP, "moonlight", "moonlight-qt")
 # Flatpak's own catalogue art, which is where the only PNGs on a Flathub
 # install actually live. `active` is the symlink flatpak keeps pointing at the
@@ -76,6 +80,14 @@ ICON_NAMES = (FLATPAK_APP, "moonlight", "moonlight-qt")
 APPSTREAM_DIRS = (
     "~/.local/share/flatpak/appstream/*/*/active/icons",
     "/var/lib/flatpak/appstream/*/*/active/icons",
+    # And the copy inside the installed application itself. The two above are
+    # flatpak's catalogue of a *remote*, which a machine that has only ever
+    # installed one thing may never have fetched -- on a console installed
+    # this morning they were empty, so the only icon found was the SVG, and
+    # with nothing on the machine able to draw an SVG the menu kept the
+    # drawing this add-on ships. These exist the moment the application does.
+    "~/.local/share/flatpak/app/*/current/active/files/share/app-info/icons/flatpak",
+    "/var/lib/flatpak/app/*/current/active/files/share/app-info/icons/flatpak",
 )
 # What can turn an SVG into a picture, if anything here can. None of these is
 # a dependency: without one, a real PNG is used instead and the only loss is

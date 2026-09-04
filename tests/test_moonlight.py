@@ -168,6 +168,43 @@ check(any("appstream" in d for d in core.APPSTREAM_DIRS),
       "flatpak's catalogue art is looked at, because on a Flathub install it "
       "is where the only PNGs are")
 
+# The state a console is actually in the morning it is installed. flatpak's
+# catalogue of the remote has never been fetched, so those directories are
+# empty; the only icon anywhere is the SVG, and a fresh Mint has nothing that
+# can draw one -- no rsvg-convert, no inkscape, no ImageMagick. So the menu
+# kept the drawing shipped here even though Moonlight was installed and had
+# an icon of its own all along. It was inside the application, not in the
+# catalogue.
+import fnmatch                                                  # noqa: E402
+
+
+class FakeGlob:
+    """Only the paths this machine is pretending to have."""
+
+    def __init__(self, paths):
+        self.paths = list(paths)
+
+    def glob(self, pattern):
+        return [p for p in self.paths if fnmatch.fnmatch(p, pattern)]
+
+
+real_glob = core.glob
+app_png = os.path.expanduser(
+    "~/.local/share/flatpak/app/" + core.FLATPAK_APP
+    + "/current/active/files/share/app-info/icons/flatpak/128x128@2/"
+    + core.FLATPAK_APP + ".png")
+app_png_small = app_png.replace("128x128@2", "64x64")
+stub(present=[], files=[svg, app_png, app_png_small])
+core.glob = FakeGlob([app_png, app_png_small])
+check(core.best_icon() == (app_png, "png"),
+      "with no catalogue and nothing to draw an SVG, the application's own "
+      "PNG is found -- which is the difference between the real icon and the "
+      "drawing on a console installed this morning")
+check("@2" in core.best_icon()[0],
+      "and the doubled one, because 128x128@2 is a real 256-pixel file and "
+      "the plain 128 beside it is not")
+core.glob = real_glob
+
 print("installing, out loud")
 
 
