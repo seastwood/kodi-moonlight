@@ -97,7 +97,11 @@ def offer_install():
             "Moonlight is not installed on this machine.\n\n"
             "Install it from Flathub now? It downloads " + DOWNLOAD_SIZE +
             " and needs no password. You can keep using Kodi while it runs.",
-            nolabel="Not now", yeslabel="Install Moonlight"):
+            # "Install Moonlight" does not fit the button: Kodi cuts it to
+            # "INSTALL MOON..." and the affirmative choice on a television
+            # ends in an ellipsis. The dialog above it has already said what
+            # is being installed, twice.
+            nolabel="Not now", yeslabel="Install"):
         return
 
     progress = xbmcgui.DialogProgressBG()
