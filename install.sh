@@ -64,6 +64,18 @@ USED=$(python3 -c "import sys; sys.path.insert(0, '$REPO'); import moonlight_cor
 print(moonlight_core.refresh_tile('$REPO/media/_moonlight.png') or '')")
 if [ -n "$USED" ]; then
   echo "menu tile from $USED"
+  # The Flathub build exports its icon as an SVG and nothing else, and Kodi
+  # cannot draw one -- so without something to turn it into a picture, the
+  # tile falls back to flatpak's catalogue PNG at 128 pixels, which is the
+  # right logo and soft on a television. Said rather than installed: it is one
+  # small package and it is not this add-on's business to put it there.
+  case "$USED" in
+    *.png)
+      if [ -f "$HOME/.local/share/flatpak/exports/share/icons/hicolor/scalable/apps/com.moonlight_stream.Moonlight.svg" ]          && ! command -v rsvg-convert >/dev/null 2>&1; then
+        echo "for a sharper one, install librsvg2-bin and run this again:"
+        echo "  sudo apt-get install -y librsvg2-bin"
+      fi ;;
+  esac
 else
   echo "no ~/.kodi/media/consoles; skipped (only kodi-retrobox uses it)"
 fi

@@ -43,16 +43,102 @@ POLL = 0.5
 RAISE_TRIES = 8
 RAISE_GAP = 0.7
 
-# Where Moonlight's own icon is once it is installed. Its own, rather than a
-# drawing: it is the icon somebody is looking for on a menu.
-ICON_PATHS = (
-    "~/.local/share/flatpak/app/" + FLATPAK_APP + "/current/active/files/"
-    "share/icons/hicolor/256x256/apps/" + FLATPAK_APP + ".png",
-    "/var/lib/flatpak/app/" + FLATPAK_APP + "/current/active/files/"
-    "share/icons/hicolor/256x256/apps/" + FLATPAK_APP + ".png",
-    "/usr/share/icons/hicolor/256x256/apps/moonlight.png",
-    "/usr/share/icons/hicolor/scalable/apps/moonlight.svg",
+# Where Moonlight's own icon is once it is installed, and it is not one place.
+#
+# The Flathub build exports exactly one icon and it is an SVG, which Kodi
+# cannot draw at all -- so the first thing this looked for, a 256-pixel PNG in
+# the application's own export directory, does not exist and never did. What
+# there is besides that is the catalogue icon flatpak keeps in its appstream
+# cache, which is the same logo as a real PNG at 128 and 64 pixels.
+#
+# So: the SVG when something on this machine can turn it into a picture, and
+# the largest real PNG otherwise. Both are Moonlight's own; the difference is
+# only how crisp it is on a television.
+APP_ICON_DIRS = (
+    "~/.local/share/flatpak/exports/share/icons/hicolor",
+    "/var/lib/flatpak/exports/share/icons/hicolor",
+    "/usr/share/icons/hicolor",
+    # Where snapd exports a snap's icons, which is how the laptop this was
+    # written on has Moonlight.
+    "/var/lib/snapd/desktop/icons",
 )
+# Biggest first: a tile is drawn at a few hundred pixels and scaling one up
+# from 64 shows.
+ICON_SIZES = ("512x512", "384x384", "256x256", "192x192", "128x128",
+              "96x96", "64x64", "48x48")
+ICON_NAMES = (FLATPAK_APP, "moonlight", "moonlight-qt")
+# Flatpak's own catalogue art, which is where the only PNGs on a Flathub
+# install actually live. `active` is the symlink flatpak keeps pointing at the
+# current copy, so this does not go stale when the catalogue updates.
+APPSTREAM_DIRS = (
+    "~/.local/share/flatpak/appstream/*/*/active/icons",
+    "/var/lib/flatpak/appstream/*/*/active/icons",
+)
+# What can turn an SVG into a picture, if anything here can. None of these is
+# a dependency: without one, a real PNG is used instead and the only loss is
+# sharpness.
+RASTERISERS = (
+    ("rsvg-convert", ["-w", "256", "-h", "256", "-o"]),
+    ("inkscape", ["--export-type=png", "--export-width=256",
+                  "--export-filename"]),
+    ("magick", None),
+    ("convert", None),
+)
+
+
+def icon_pngs():
+    """Every real PNG of Moonlight's icon on this machine, biggest first."""
+    found = []
+    for size in ICON_SIZES:
+        for folder in APP_ICON_DIRS:
+            for name in ICON_NAMES:
+                path = os.path.expanduser(
+                    os.path.join(folder, size, "apps", name + ".png"))
+                if exists(path):
+                    found.append(path)
+        for pattern in APPSTREAM_DIRS:
+            for name in ICON_NAMES:
+                for path in sorted(glob.glob(os.path.expanduser(
+                        os.path.join(pattern, size, name + ".png")))):
+                    if exists(path):
+                        found.append(path)
+    return found
+
+
+def icon_svg():
+    """Moonlight's icon as an SVG, if it exported one."""
+    for folder in APP_ICON_DIRS:
+        for name in ICON_NAMES:
+            path = os.path.expanduser(
+                os.path.join(folder, "scalable", "apps", name + ".svg"))
+            if exists(path):
+                return path
+    return None
+
+
+def rasteriser():
+    """A command that can turn an SVG into a PNG, or None."""
+    for name, flags in RASTERISERS:
+        if shutil.which(name):
+            return name, flags
+    return None
+
+
+def render_svg(svg, into):
+    """Draw an SVG at tile size. True if something on this machine could."""
+    tool = rasteriser()
+    if not tool:
+        return False
+    name, flags = tool
+    if flags is None:                 # ImageMagick: -density then a resize
+        argv = [name, "-background", "none", "-density", "384", svg,
+                "-resize", "256x256", into]
+    else:
+        argv = [name, *flags[:-1], flags[-1], into, svg] if flags[-1].endswith(
+            ("-o", "--export-filename")) else [name, *flags, into, svg]
+    sh(*argv, timeout=30)
+    return exists(into) and os.path.getsize(into) > 0
+
 
 # Where kodi-retrobox's menu looks for the tile.
 TILE = "~/.kodi/media/consoles/_moonlight.png"
@@ -221,33 +307,72 @@ def bring_forward(deadline=None):
 
 
 def best_icon():
-    """Moonlight's own icon if this machine has one, else None."""
-    for path in ICON_PATHS:
-        full = os.path.expanduser(path)
-        if exists(full):
-            return full
-    return None
+    """The best picture of Moonlight's own icon, as (path, kind), or None.
+
+    The SVG wins where it can be drawn, because it is 256 pixels of plain
+    shapes and every PNG on a Flathub install is 128 or smaller. Where it
+    cannot, the largest PNG is used and the tile is a little soft, which is a
+    far better answer than a drawing that is not Moonlight's icon at all.
+    """
+    svg = icon_svg()
+    if svg and rasteriser():
+        return svg, "svg"
+    pngs = icon_pngs()
+    if pngs:
+        return pngs[0], "png"
+    return (svg, "svg") if svg else None
+
+
+def _same_file(path, data):
+    """Whether the tile already holds exactly this, so the cache is left be."""
+    try:
+        with open(path, "rb") as existing:
+            return existing.read() == data
+    except OSError:
+        return False
 
 
 def refresh_tile(fallback=None):
     """Put the best icon available on the menu tile. Returns what it used.
 
     Called at install time and again once Moonlight itself is installed,
-    because its own icon does not exist until it does.
+    because its own icon does not exist until it does -- and on a Flathub
+    install what exists then is an SVG, which is why this may have to draw it
+    rather than copy it.
     """
     tile = os.path.expanduser(TILE)
     if not os.path.isdir(os.path.dirname(tile)):
         return None                   # no kodi-retrobox here; nothing reads it
-    source = best_icon() or fallback
+
+    best = best_icon()
+    if best and best[1] == "svg":
+        source, _kind = best
+        drawn = tile + ".new"
+        if render_svg(source, drawn):
+            try:
+                with open(drawn, "rb") as reading:
+                    data = reading.read()
+                if _same_file(tile, data):
+                    os.remove(drawn)
+                    return tile
+                os.replace(drawn, tile)     # never a half-written tile
+            except OSError:
+                return None
+            return source
+        # Nothing here could draw it. Fall through to a real PNG rather than
+        # writing an SVG that Kodi will not display -- a blank tile is worse
+        # than a soft one.
+        pngs = icon_pngs()
+        best = (pngs[0], "png") if pngs else None
+
+    source = best[0] if best else fallback
     if not source or not exists(source):
         return None
     try:
         with open(source, "rb") as reading:
             data = reading.read()
-        if os.path.exists(tile):
-            with open(tile, "rb") as existing:
-                if existing.read() == data:
-                    return tile       # already right; do not disturb the cache
+        if _same_file(tile, data):
+            return tile
         with open(tile, "wb") as writing:
             writing.write(data)
     except OSError:

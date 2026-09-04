@@ -115,15 +115,35 @@ stub(output={"-lG": "0x02000003  0 0 0 1920 1080 retro Kodi\n"})
 check(core.window() is None, "and Kodi's own window is not Moonlight's")
 
 print("the icon on the menu tile")
-stub(present=[], files=[os.path.expanduser(core.ICON_PATHS[1])])
-check(core.best_icon() == os.path.expanduser(core.ICON_PATHS[1]),
-      "Moonlight's own, from inside the installation")
-stub(present=[])
+# What a Flathub install actually has: one SVG, which Kodi cannot draw, and
+# the catalogue PNGs flatpak keeps in its appstream cache. The first version
+# of this looked for a 256-pixel PNG in the app's own export directory, which
+# does not exist and never did -- so the tile stayed as the drawing.
+svg = os.path.expanduser(
+    "~/.local/share/flatpak/exports/share/icons/hicolor/scalable/apps/"
+    + core.FLATPAK_APP + ".svg")
+png128 = os.path.expanduser(
+    "/usr/share/icons/hicolor/128x128/apps/moonlight.png")
+png256 = os.path.expanduser(
+    "/usr/share/icons/hicolor/256x256/apps/moonlight.png")
+
+stub(present=["rsvg-convert"], files=[svg, png128])
+check(core.best_icon() == (svg, "svg"),
+      "the SVG wins where something can draw it: it is 256 pixels of shapes "
+      "and every PNG on a Flathub install is 128 or smaller")
+stub(present=[], files=[svg, png128])
+check(core.best_icon() == (png128, "png"),
+      "and where nothing can, a real PNG is used -- a soft tile beats a blank "
+      "one, which is what writing an SVG Kodi cannot draw would give")
+stub(present=[], files=[png128, png256])
+check(core.best_icon() == (png256, "png"), "the biggest PNG, not the first")
+stub(present=[], files=[])
 check(core.best_icon() is None,
-      "and nothing at all before it is installed, so the drawing shipped here "
-      "is what the tile gets until then")
-check(all("flatpak" in p or "/usr/share/icons" in p for p in core.ICON_PATHS),
-      "the places looked at are installations, not a guess at a name")
+      "and nothing at all before Moonlight is installed, so the drawing "
+      "shipped here is what the tile gets until then")
+check(any("appstream" in d for d in core.APPSTREAM_DIRS),
+      "flatpak's catalogue art is looked at, because on a Flathub install it "
+      "is where the only PNGs are")
 
 print("installing, out loud")
 
